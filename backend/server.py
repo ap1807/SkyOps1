@@ -1,89 +1,202 @@
-from fastapi import FastAPI, APIRouter
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
+import io
 import logging
+import os
+
+import pandas as pd
+from dotenv import load_dotenv
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
+
+load_dotenv(Path(__file__).parent / ".env")
+
+from fastapi import FastAPI, APIRouter, Depends, UploadFile, File, HTTPException
+from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
+
+from database import db, close_client
+from auth import auth_router, get_current_user, seed_admin
+from data_engine import engine, SERVICE_FIELDS, SERVICE_LABELS, CLASSES
+from feed_engine import feed
+from ai_insights import generate_insights
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("skyops")
+
+app = FastAPI(title="SkyOps Aviation Intelligence")
+api = APIRouter(prefix="/api")
 
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
-
-
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+@api.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"service": "SkyOps Aviation Intelligence", "status": "online"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+@api.get("/meta")
+async def meta(user: dict = Depends(get_current_user)):
+    return {
+        "service_fields": [{"field": f, "label": SERVICE_LABELS[f]} for f in SERVICE_FIELDS],
+        "classes": CLASSES,
+    }
 
-# Include the router in the main app
-app.include_router(api_router)
+
+# ---------------- analytics ----------------
+@api.get("/analytics/overview")
+async def overview(user: dict = Depends(get_current_user)):
+    return engine.overview_metrics()
+
+
+@api.get("/analytics/satisfaction")
+async def satisfaction(user: dict = Depends(get_current_user)):
+    return engine.satisfaction_breakdown()
+
+
+@api.get("/analytics/age-distribution")
+async def age_dist(user: dict = Depends(get_current_user)):
+    return {"bands": engine.age_distribution()}
+
+
+@api.get("/analytics/drivers")
+async def drivers(user: dict = Depends(get_current_user)):
+    return {"drivers": engine.satisfaction_drivers()}
+
+
+@api.get("/analytics/conditional")
+async def conditional(user: dict = Depends(get_current_user)):
+    return {"insights": engine.conditional_insights()}
+
+
+@api.get("/analytics/significance")
+async def significance(user: dict = Depends(get_current_user)):
+    return {"findings": engine.significance_findings()}
+
+
+@api.get("/analytics/compare")
+async def compare(dimension: str = "class", user: dict = Depends(get_current_user)):
+    return engine.compare_segments(dimension)
+
+
+@api.get("/analytics/explorer")
+async def explorer(limit: int = 50, travel_class: Optional[str] = None,
+                   satisfied: Optional[int] = None, user: dict = Depends(get_current_user)):
+    return {"rows": engine.sample_rows(limit=min(limit, 200), travel_class=travel_class, satisfied=satisfied),
+            "source": engine.source}
+
+
+class PredictBody(BaseModel):
+    travel_class: Optional[str] = "Eco"
+    customer_type: Optional[str] = "Loyal"
+    travel_type: Optional[str] = "Business"
+    age: Optional[int] = None
+    flight_distance: Optional[int] = None
+    arrival_delay: Optional[int] = None
+    seat_comfort: Optional[int] = None
+    online_boarding: Optional[int] = None
+    inflight_wifi: Optional[int] = None
+    inflight_entertainment: Optional[int] = None
+    onboard_service: Optional[int] = None
+    legroom_service: Optional[int] = None
+    cleanliness: Optional[int] = None
+
+
+@api.post("/analytics/predict")
+async def predict(body: PredictBody, user: dict = Depends(get_current_user)):
+    return engine.predict(body.model_dump())
+
+
+@api.post("/analytics/upload")
+async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    try:
+        raw = await file.read()
+        df = pd.read_csv(io.BytesIO(raw))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read CSV: {e}")
+
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    rename = {
+        "inflight_wifi_service": "inflight_wifi",
+        "ease_of_online_booking": "online_booking",
+        "food_and_drink": "food_and_drink",
+        "leg_room_service": "legroom_service",
+        "departure/arrival_time_convenient": "time_convenience",
+        "class": "travel_class",
+        "type_of_travel": "travel_type",
+        "arrival_delay_in_minutes": "arrival_delay",
+        "departure_delay_in_minutes": "departure_delay",
+    }
+    df = df.rename(columns=rename)
+    sat_col = next((c for c in ["satisfied", "satisfaction"] if c in df.columns), None)
+    if not sat_col:
+        raise HTTPException(status_code=400, detail="CSV must include a 'satisfaction' or 'satisfied' column")
+    if sat_col == "satisfaction":
+        df["satisfied"] = df["satisfaction"].astype(str).str.contains("satisf", case=False).astype(int)
+    missing = [f for f in SERVICE_FIELDS if f not in df.columns]
+    for f in missing:
+        df[f] = 3
+    for c in ["age", "flight_distance", "arrival_delay", "departure_delay"]:
+        if c not in df.columns:
+            df[c] = 0
+    for c in ["customer_type", "travel_type", "travel_class", "gender"]:
+        if c not in df.columns:
+            df[c] = "Eco" if c == "travel_class" else "Unknown"
+    df = df.dropna(subset=["satisfied"])
+    if len(df) < 30:
+        raise HTTPException(status_code=400, detail="Dataset too small after cleaning (need >= 30 rows)")
+    engine.load_dataframe(df, f"Uploaded: {file.filename}")
+    return {"ok": True, "rows": int(len(df)), "source": engine.source}
+
+
+# ---------------- live feed ----------------
+@api.get("/feed/live")
+async def live(user: dict = Depends(get_current_user)):
+    return feed.snapshot()
+
+
+# ---------------- AI ----------------
+class InsightBody(BaseModel):
+    scope: str = "overview"
+
+
+@api.post("/ai/insights")
+async def ai_insights(body: InsightBody, user: dict = Depends(get_current_user)):
+    if body.scope == "disruption":
+        context = feed.snapshot()["kpis"]
+    elif body.scope == "satisfaction":
+        context = {
+            "overview": engine.overview_metrics(),
+            "drivers": engine.satisfaction_drivers()[:5],
+        }
+    else:
+        context = {
+            "overview": engine.overview_metrics(),
+            "live": feed.snapshot()["kpis"],
+        }
+    result = await generate_insights(body.scope, context)
+    return result
+
+
+app.include_router(auth_router)
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=[os.environ.get("FRONTEND_URL", "http://localhost:3000")],
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def on_start():
+    await seed_admin()
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.login_attempts.create_index("identifier")
+    except Exception as e:
+        logger.warning(f"index setup: {e}")
+    logger.info("SkyOps backend ready.")
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+async def on_shutdown():
+    close_client()

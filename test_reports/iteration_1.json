@@ -1,0 +1,55 @@
+{
+  "summary": "First-pass E2E test of SkyOps. Backend: 27/28 pytest cases pass. Frontend: all 7 pages render and work end-to-end (login, overview KPIs, satisfaction analytics, predictive prediction, segment comparisons, disruption monitor, AI advisor, data explorer). AI insights confirmed using real openai:gpt-4o for all 3 scopes (overview/satisfaction/disruption). One CRITICAL backend bug found in /api/analytics/upload that also corrupts engine state.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/analytics/upload",
+        "issue": "Satisfaction column mapping is broken: df['satisfaction'].str.contains('satisf', case=False) returns True for BOTH 'satisfied' AND 'neutral or dissatisfied' (because 'dissatisfied' also contains 'satisf'). On the real Kaggle Airline Passenger Satisfaction CSV (the obvious target dataset), this maps all rows to satisfied=1 -> LogisticRegression fails with 'samples of at least 2 classes' -> 500. Fix: check for 'dissatisf' first OR use exact equality to 'satisfied'/'neutral or dissatisfied'.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "POST /api/analytics/upload (state corruption)",
+        "issue": "AnalyticsEngine.load_dataframe assigns self.df = df and self.source = source BEFORE _fit_model(). If _fit_model raises (e.g. single-class CSV from the bug above), the engine keeps the corrupt dataframe but the OLD model. All subsequent /api/analytics/* endpoints return wrong stats (e.g. satisfaction_rate=100%, business_share=100%) until backend restart. Fix: validate data + fit on a temp copy, only swap self.df/self.source after successful fit, or wrap in try/except that restores previous state.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {"endpoint": "CORS config", "issue": "server.py CORS uses os.environ.get('FRONTEND_URL', 'http://localhost:3000') and ignores CORS_ORIGINS env (which is set to '*'). Inconsistent; works only because FRONTEND_URL is set."},
+      {"endpoint": "auth cookie", "issue": "secure=False on cookie. Acceptable for preview, but should be True in production HTTPS."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Login", "issues": ["Admin password 'SkyOps@2026' is pre-filled in the password input by default — demo convenience but a security smell if shipped."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix /api/analytics/upload satisfaction mapping so 'neutral or dissatisfied' is correctly mapped to 0 (e.g. use df['satisfaction'].str.strip().str.lower().eq('satisfied').astype(int), or detect 'dissatisf' first).",
+    "Make AnalyticsEngine.load_dataframe transactional: validate >=2 satisfied classes and fit on a temp copy before replacing self.df/self.source/self.model. Roll back on exception so a bad upload cannot poison the live engine.",
+    "Consider returning 400 (not 500) with a clear message when uploaded CSV has only one satisfaction class.",
+    "Either remove default-filled admin credentials from Login.jsx for production, or guard behind a NODE_ENV check."
+  ],
+  "critical_code_review_comments": [
+    "data_engine.load_dataframe is non-atomic (state corruption risk on bad upload).",
+    "Upload satisfaction parsing uses substring match that is incorrect for the canonical airline dataset.",
+    "CORS allow_origins ignores the configured CORS_ORIGINS env var.",
+    "server.py uses deprecated @app.on_event lifecycle; consider migrating to lifespan context (cosmetic for now)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/__init__.py (new)",
+    "/app/backend/tests/backend_test.py (new)"
+  ],
+  "success_rate": {"backend": "96% (27/28)", "frontend": "100% (all 7 routes + AI insights + predict + explorer)"},
+  "test_credentials": "admin@skyops.ai / SkyOps@2026 (loaded from /app/memory/test_credentials.md). Login worked, JWT bearer auth + httpOnly cookie both set on /api/auth/login.",
+  "seed_data_creation": "test_register_new_user creates a TEST_ analyst account (test_user_<ts>@skyops.ai) per run. No cleanup endpoint exposed; cleanup deferred (low priority — Mongo users collection grows slowly).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend was restarted once during this run because the upload bug poisoned the in-memory AnalyticsEngine. If overview KPIs look suspicious (e.g. 100% satisfaction, 100% business share, 0% loyal), restart backend before testing. The Comparisons page uses a shadcn-style custom dropdown (not native <select>); use data-testid or role-based selectors. Live feed endpoint /api/feed/live mutates state every call by design (tick()) and changes timestamp/congestion across polls — verified.",
+  "rca_of_issue": "Bug 1 (Upload 500): server.py line 131 does df['satisfaction'].astype(str).str.contains('satisf', case=False).astype(int). For the Kaggle dataset the values are 'satisfied' and 'neutral or dissatisfied' — the second contains substring 'satisf' so ALL rows get satisfied=1. Bug 2 (engine corruption): data_engine.py load_dataframe replaces self.df / self.source before _fit_model raises, so the engine is left in a half-mutated state. Reproduction: POST a CSV with both labels to /api/analytics/upload while authenticated -> 500. Subsequent /api/analytics/overview returns inflated/poisoned numbers until backend restart. Mitigation: (a) parse satisfaction labels with exact-match logic; (b) wrap load_dataframe in transactional pattern that only commits after successful fit."
+}
