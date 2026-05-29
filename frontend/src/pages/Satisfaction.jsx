@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import api, { CHART } from "@/lib/api";
-import { Panel } from "@/components/widgets";
+import { Panel, LiveDot } from "@/components/widgets";
 import { TrendingUp, TrendingDown, Lightbulb, FlaskConical } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell,
@@ -13,13 +13,20 @@ export default function Satisfaction() {
   const [ages, setAges] = useState([]);
   const [sat, setSat] = useState(null);
   const [findings, setFindings] = useState([]);
+  const [updatedAt, setUpdatedAt] = useState(null);
 
   useEffect(() => {
-    api.get("/analytics/drivers").then((r) => setDrivers(r.data.drivers.slice(0, 8)));
-    api.get("/analytics/conditional").then((r) => setConditional(r.data.insights));
-    api.get("/analytics/age-distribution").then((r) => setAges(r.data.bands));
-    api.get("/analytics/satisfaction").then((r) => setSat(r.data));
-    api.get("/analytics/significance").then((r) => setFindings(r.data.findings));
+    const load = () => {
+      api.get("/analytics/drivers").then((r) => setDrivers(r.data.drivers.slice(0, 8)));
+      api.get("/analytics/conditional").then((r) => setConditional(r.data.insights));
+      api.get("/analytics/age-distribution").then((r) => setAges(r.data.bands));
+      api.get("/analytics/satisfaction").then((r) => setSat(r.data));
+      api.get("/analytics/significance").then((r) => setFindings(r.data.findings));
+      setUpdatedAt(new Date());
+    };
+    load();
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
   }, []);
 
   const donut = sat
@@ -32,6 +39,12 @@ export default function Satisfaction() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <LiveDot label="LIVE ANALYTICS" />
+        <span className="text-xs text-slate-400 font-plex-mono">
+          {updatedAt ? `updated ${updatedAt.toLocaleTimeString()}` : "loading…"}
+        </span>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Drivers */}
         <Panel testid="panel-drivers" className="lg:col-span-2" title="Top Satisfaction Drivers"

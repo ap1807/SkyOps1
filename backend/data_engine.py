@@ -101,6 +101,7 @@ class AnalyticsEngine:
     def __init__(self):
         self.df = _generate()
         self.source = "Synthetic Operational Dataset"
+        self.live_delta = 0.0  # live drift (percentage points) applied to satisfaction metrics
         self._fit_model()
 
     # ---------------- model ----------------
@@ -129,20 +130,24 @@ class AnalyticsEngine:
         self.feature_order, self.scaler, self.model = feature_order, scaler, model
 
     # ---------------- descriptive ----------------
+    def _live(self, rate_pct: float) -> float:
+        return round(float(np.clip(rate_pct + self.live_delta, 0, 100)), 1)
+
     def overview_metrics(self) -> dict:
         df = self.df
         n = len(df)
         sat_rate = float(df["satisfied"].mean())
         on_time = float((df["arrival_delay"] <= 15).mean())
         avg_rating = float(df[SERVICE_FIELDS].mean().mean())
+        live_sat = self._live(sat_rate * 100)
         # operational risk: blend of dissatisfaction, delays, weak avg rating
         risk = float(np.clip(
-            0.45 * (1 - sat_rate) + 0.35 * (1 - on_time) + 0.20 * (1 - avg_rating / 5),
+            0.45 * (1 - live_sat / 100) + 0.35 * (1 - on_time) + 0.20 * (1 - avg_rating / 5),
             0, 1,
         ))
         return {
             "total_passengers": int(n),
-            "satisfaction_rate": round(sat_rate * 100, 1),
+            "satisfaction_rate": live_sat,
             "on_time_performance": round(on_time * 100, 1),
             "avg_service_rating": round(avg_rating, 2),
             "avg_arrival_delay": round(float(df["arrival_delay"].mean()), 1),
@@ -159,7 +164,7 @@ class AnalyticsEngine:
             g = df.groupby(col)["satisfied"].agg(["mean", "count"]).reset_index()
             return [
                 {"segment": str(r[col]),
-                 "satisfaction_rate": round(float(r["mean"]) * 100, 1),
+                 "satisfaction_rate": self._live(float(r["mean"]) * 100),
                  "passengers": int(r["count"])}
                 for _, r in g.iterrows()
             ]

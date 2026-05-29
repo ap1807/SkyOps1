@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import api, { CHART } from "@/lib/api";
-import { Panel } from "@/components/widgets";
+import { Panel, LiveDot } from "@/components/widgets";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -21,17 +21,24 @@ export default function Comparisons() {
   const [findings, setFindings] = useState([]);
 
   useEffect(() => {
-    api.get(`/analytics/compare?dimension=${dim}`).then((r) => setData(r.data));
+    const load = () => api.get(`/analytics/compare?dimension=${dim}`).then((r) => setData(r.data));
+    load();
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
   }, [dim]);
 
   useEffect(() => {
-    api.get("/analytics/significance").then((r) => setFindings(r.data.findings));
+    const load = () => api.get("/analytics/significance").then((r) => setFindings(r.data.findings));
+    load();
+    const t = setInterval(load, 12000);
+    return () => clearInterval(t);
   }, []);
 
   const segs = data?.segments || [];
 
   return (
     <div className="space-y-6">
+      <LiveDot label="LIVE COMPARISON" />
       <Panel testid="panel-compare" title="Segment Comparison"
         subtitle="Benchmark satisfaction and delays across operational segments"
         right={

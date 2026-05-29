@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 2 — full backend + frontend regression of the new server-driven realtime layer. 33/33 pytest tests PASS (added 5 new tests: pulse_shape, pulse_unauth, pulse_evolves_over_time, overview_satisfaction_reflects_live_drift, transactional single-class CSV upload). Confirmed /api/realtime/pulse: full shape (kpis/history/by_class/events/congestion/flights/disruption_forecast/recommendations), 401 without auth, history grows 15→18 over 8s, satisfaction_rate & operational_risk_index drift across polls — proving the 3s asyncio background ticker runs in-process. Verified /api/feed/live still returns evolving snapshots, /api/analytics/overview & /satisfaction now reflect live_delta drift, all /analytics/compare dimensions return ≥2 segments on synthetic data, /api/ai/insights returns real openai:gpt-4o output for overview|satisfaction|disruption, and CSV upload remains transactional (single-class rejected with 400, engine source & satisfaction_rate unchanged). Frontend: login OK, Executive Overview KPIs/chart/feed stream live (48.4%→48.1%, risk 37.3→36.5 in 7s, new tick added to chart, feed prepended), Disruption Monitor (gauges, 67.7% HIGH RISK forecast, congestion bars, flight board, weather, stream) updates live, Predictive Insights shows the new 'Live Network Disruption Forecast' LIVE card, AI Advisor shows 'Live Operational Recommendations' with disruption-risk badge and dynamic recs and 'Generate Insights' produces a gpt-4o deep dive, Comparisons has data-testid='select-dimension' and renders Live Comparison.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/analytics/drivers",
+        "issue": "Returns HTTP 500 when the active dataset is degenerate (e.g. after a sparse upload with only travel_class column populated — other features like gender/customer_type/travel_type are all 'Unknown'). The endpoint should gracefully return an empty/fallback driver list with 200 instead of bubbling a regression-fit exception. This directly crashes the frontend Satisfaction Analytics page with a red 'Uncaught runtime errors: Request failed with status code 500' overlay (captured 4× during navigation).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/api/analytics/compare?dimension=class (et al.)",
+        "issue": "When the underlying CSV lacks gender/customer_type/travel_type columns, those dimensions return a single 'Unknown' segment and Comparisons UI renders 'nan% loyal satisfaction'. Backend should coerce missing categorical columns into a sensible default (e.g. balanced synthetic split) or return an explicit 'insufficient_dimension' flag the UI can handle."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "SatisfactionAnalytics page",
+        "issue": "No React error boundary — a single 500 from /api/analytics/drivers crashes the whole page with the dev error overlay. Should catch axios failure per-card and render a 'data unavailable' placeholder so the rest of the Satisfaction page keeps streaming.",
+        "selector": "/satisfaction",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Comparisons — 'What the Numbers Confirm'",
+        "issue": "Renders literal 'nan% loyal satisfaction' when customer_type column is missing in active dataset. Should hide the line or display '—'.",
+        "selector": "/compare",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Harden GET /api/analytics/drivers: catch regression/empty-feature errors and return 200 with an empty drivers list instead of 500.",
+    "Add a React error boundary (or per-call try/catch with skeleton fallback) on Satisfaction Analytics so a single failing card doesn't crash the route.",
+    "Sanitise nan/inf in Comparisons summary lines ('What the Numbers Confirm') — render '—' when computed share is NaN."
+  ],
+  "critical_code_review_comments": [
+    "realtime_engine.tick + feed_engine.tick both mutate global singletons under an asyncio task with no lock — single-worker uvicorn keeps this safe today, but document this constraint (the platform cannot be scaled to multiple workers without moving state to Redis or similar).",
+    "data_engine.load_dataframe is now transactional (good), but the engine state is fully in-memory and resets on backend restart; consider persisting last-uploaded dataset hash + source to disk so reloads don't silently revert to synthetic.",
+    "/api/analytics/drivers currently lets statsmodels/sklearn exceptions escape — wrap fit in try/except and return graceful fallback to avoid 500 storms from polling clients."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (33/33 pytest, including 5 new realtime/transactional tests)",
+    "frontend": "85% — all 7 routes load and live-stream correctly; Satisfaction page crashes when drivers API 500s on degenerate dataset"
+  },
+  "test_credentials": "admin@skyops.ai / SkyOps@2026 (verified working via /api/auth/login and UI Enter Command Center button).",
+  "seed_data_creation": "TestUpload posts an in-memory 40-row TEST_upload.csv (Business/Eco mix, satisfied/dissatisfied) and TestUploadTransactional posts a single-class CSV that is correctly rejected with 400. No external seed needed.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend was restarted ONCE during this iteration to clear an earlier pytest run's CSV-upload pollution; after that restart all 33 tests pass clean. The pytest suite itself loads a 2-class TEST_upload.csv mid-run which then becomes the active dataset for the remainder of the backend process lifetime — this is why the Satisfaction page may show a /api/analytics/drivers 500 in the UI after pytest runs. To reproduce that bug deterministically: run pytest, then open the UI /satisfaction route. To get a clean synthetic state for UI screenshots: sudo supervisorctl restart backend (note this clears pulse history; allow ~15s for history to repopulate). The pulse history cap of 40 and ~3s tick are confirmed working. data-testid='select-dimension' exists on Comparisons.",
+  "rca of the issue": "RCA for /api/analytics/drivers 500 → frontend crash: (1) the upload endpoint correctly accepts any 2-class CSV (TestUpload), but our test CSV intentionally omits gender/customer_type/travel_type/flight_distance/inflight_entertainment etc.; (2) drivers endpoint fits a regression over those features and throws when a feature column is constant/singular; (3) FastAPI bubbles the exception as 500; (4) the React Satisfaction page calls drivers via axios without an error boundary and React's dev overlay covers the whole route. Mitigation: wrap the regression fit in try/except in /api/analytics/drivers returning {drivers: [], note: 'insufficient feature variance'}, and add per-card try/catch on the frontend so the live KPI streaming above continues uninterrupted."
+}

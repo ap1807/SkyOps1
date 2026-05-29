@@ -90,8 +90,7 @@ class FeedState:
         for _ in range(random.randint(1, 2)):
             self._emit_event()
 
-    def snapshot(self):
-        self.tick()
+    def view(self):
         active = len(self.flights)
         delayed = sum(1 for f in self.flights if f["delay"] > 15)
         on_time_pct = round((1 - delayed / active) * 100, 1) if active else 100.0
@@ -120,6 +119,11 @@ class FeedState:
             "events": self.events[:14],
             "congestion": congestion_list,
         }
+
+    def snapshot(self):
+        # advance state then return current view (used by request-driven callers)
+        self.tick()
+        return self.view()
 
 
 feed = FeedState()

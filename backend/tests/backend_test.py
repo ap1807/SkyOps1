@@ -181,7 +181,8 @@ class TestUpload:
         rows = ["satisfaction,travel_class,age,arrival_delay,seat_comfort,online_boarding,inflight_wifi"]
         for i in range(40):
             sat = "satisfied" if i % 2 == 0 else "neutral or dissatisfied"
-            rows.append(f"{sat},Business,{30 + i % 20},{i % 30},{4 - i % 3},{3 + i % 3},{3}")
+            klass = "Business" if i % 2 == 0 else "Eco"
+            rows.append(f"{sat},{klass},{30 + i % 20},{i % 30},{4 - i % 3},{3 + i % 3},{3}")
         csv_bytes = ("\n".join(rows)).encode("utf-8")
         files = {"file": ("TEST_upload.csv", io.BytesIO(csv_bytes), "text/csv")}
         r = requests.post(f"{API}/analytics/upload", files=files, headers=auth_headers)
@@ -217,6 +218,91 @@ class TestFeed:
         b = requests.get(f"{API}/feed/live", headers=auth_headers).json()
         # timestamps should differ; congestion or events should drift
         assert a["timestamp"] != b["timestamp"]
+
+
+# ---------- realtime pulse ----------
+class TestRealtime:
+    def test_pulse_shape(self, auth_headers):
+        r = requests.get(f"{API}/realtime/pulse", headers=auth_headers)
+        assert r.status_code == 200
+        d = r.json()
+        for k in ["timestamp", "kpis", "history", "by_class", "events",
+                  "congestion", "flights", "disruption_forecast",
+                  "recommendations", "source"]:
+            assert k in d, f"missing {k}"
+        # kpis shape
+        for k in ["satisfaction_rate", "on_time_performance",
+                  "operational_risk_index", "avg_service_rating",
+                  "active_flights", "delayed_flights", "avg_congestion",
+                  "weather_risk", "loyal_share", "business_share",
+                  "total_passengers"]:
+            assert k in d["kpis"], f"missing kpi {k}"
+        # disruption forecast
+        df = d["disruption_forecast"]
+        assert 0 <= df["probability"] <= 100
+        assert df["level"] in ("Low", "Elevated", "High")
+        assert df["window"]
+        # recommendations dynamic 1-4
+        recs = d["recommendations"]
+        assert isinstance(recs, list) and 1 <= len(recs) <= 4
+        for rc in recs:
+            assert "title" in rc and "detail" in rc and "priority" in rc
+        # by_class array
+        assert isinstance(d["by_class"], list) and len(d["by_class"]) >= 2
+        # history bounded to 40
+        assert isinstance(d["history"], list) and len(d["history"]) <= 40
+
+    def test_pulse_unauth(self):
+        r = requests.get(f"{API}/realtime/pulse")
+        assert r.status_code == 401
+
+    def test_pulse_evolves_over_time(self, auth_headers):
+        """Poll the pulse twice ~7s apart; the server-side ticker (every 3s)
+        should advance state so satisfaction_rate / risk / history length change."""
+        a = requests.get(f"{API}/realtime/pulse", headers=auth_headers).json()
+        time.sleep(7)
+        b = requests.get(f"{API}/realtime/pulse", headers=auth_headers).json()
+        assert a["timestamp"] != b["timestamp"]
+        changed = (
+            a["kpis"]["satisfaction_rate"] != b["kpis"]["satisfaction_rate"]
+            or a["kpis"]["operational_risk_index"] != b["kpis"]["operational_risk_index"]
+            or len(a["history"]) != len(b["history"])
+            or a["history"][-1:] != b["history"][-1:]
+        )
+        assert changed, f"pulse did not evolve in 7s -- a={a['kpis']} b={b['kpis']}"
+
+    def test_overview_satisfaction_reflects_live_drift(self, auth_headers):
+        """overview_metrics applies engine.live_delta; should move across ticks."""
+        a = requests.get(f"{API}/analytics/overview", headers=auth_headers).json()
+        time.sleep(7)
+        b = requests.get(f"{API}/analytics/overview", headers=auth_headers).json()
+        # satisfaction_rate may drift due to live_delta
+        assert a["satisfaction_rate"] != b["satisfaction_rate"] \
+            or a["operational_risk_index"] != b["operational_risk_index"]
+
+
+# ---------- transactional upload safety ----------
+class TestUploadTransactional:
+    def test_single_class_csv_rejected_without_corruption(self, auth_headers):
+        # capture pre-state
+        pre = requests.get(f"{API}/analytics/overview", headers=auth_headers).json()
+        pre_source = pre["source"]
+        # build a single-class CSV (all satisfied)
+        rows = ["satisfaction,travel_class,age,arrival_delay,seat_comfort,online_boarding,inflight_wifi"]
+        for i in range(40):
+            rows.append(f"satisfied,Business,{30 + i % 20},{i % 30},5,5,4")
+        csv_bytes = ("\n".join(rows)).encode("utf-8")
+        files = {"file": ("TEST_single.csv", io.BytesIO(csv_bytes), "text/csv")}
+        r = requests.post(f"{API}/analytics/upload", files=files, headers=auth_headers)
+        assert r.status_code == 400, r.text
+        # post-state must be unchanged: same source, satisfaction_rate in 50-80% band
+        post = requests.get(f"{API}/analytics/overview", headers=auth_headers).json()
+        # source should be same as before the bad upload (not changed)
+        assert post["source"] == pre_source, \
+            f"engine corrupted: source {pre_source!r} -> {post['source']!r}"
+        # satisfaction_rate should not be 100% (would indicate corruption)
+        assert post["satisfaction_rate"] < 95, \
+            f"satisfaction_rate suspiciously high after bad upload: {post['satisfaction_rate']}"
 
 
 # ---------- ai insights ----------

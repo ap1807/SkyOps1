@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
-import { Panel } from "@/components/widgets";
-import { Sparkles, Plane, ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
+import usePulse from "@/lib/usePulse";
+import { Panel, LiveDot } from "@/components/widgets";
+import { Sparkles, Plane, TrendingUp, TrendingDown, Radar } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -33,6 +34,8 @@ export default function Predictive() {
   });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const { pulse } = usePulse(4000);
+  const fc = pulse?.disruption_forecast;
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -121,6 +124,25 @@ export default function Predictive() {
 
       {/* Result */}
       <div className="lg:col-span-2 space-y-6">
+        <Panel testid="panel-live-forecast" title="Live Network Disruption Forecast" right={<LiveDot />}
+          subtitle="Real-time projection across the active network">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-baseline gap-1">
+                <span className="font-display text-4xl font-black text-slate-900">{fc?.probability ?? "—"}</span>
+                <span className="text-lg text-slate-400">%</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">{fc?.window || "next 60 min"}</p>
+            </div>
+            <span className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider px-3 py-1.5 border rounded-sm ${
+              fc?.level === "High" ? "bg-rose-50 text-rose-700 border-rose-200" :
+              fc?.level === "Elevated" ? "bg-amber-50 text-amber-700 border-amber-200" :
+              "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+              <Radar className="w-3.5 h-3.5" />{fc?.level || "—"} risk
+            </span>
+          </div>
+        </Panel>
+
         <Panel testid="panel-predict-result" title="Satisfaction Forecast">
           <div className="flex flex-col items-center py-2">
             <div className="relative w-40 h-40 rounded-full"

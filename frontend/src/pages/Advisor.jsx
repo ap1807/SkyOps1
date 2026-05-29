@@ -1,7 +1,8 @@
 import { useState } from "react";
 import api from "@/lib/api";
-import { Panel, PriorityBadge } from "@/components/widgets";
-import { Bot, Sparkles, AlertTriangle, Cpu } from "lucide-react";
+import usePulse from "@/lib/usePulse";
+import { Panel, PriorityBadge, LiveDot } from "@/components/widgets";
+import { Bot, Sparkles, AlertTriangle, Cpu, Activity } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -16,6 +17,7 @@ export default function Advisor() {
   const [scope, setScope] = useState("overview");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const { pulse } = usePulse(4000);
 
   const generate = async () => {
     setLoading(true);
@@ -65,6 +67,38 @@ export default function Advisor() {
       </Panel>
 
       <div className="lg:col-span-2 space-y-6">
+        <Panel testid="panel-live-recs" title="Live Operational Recommendations" right={<LiveDot />}
+          subtitle="Auto-updating actions driven by current network conditions">
+          {pulse?.disruption_forecast && (
+            <div className="flex items-center gap-2 mb-4 text-sm">
+              <Activity className="w-4 h-4 text-blue-600" />
+              <span className="text-slate-500">Disruption risk</span>
+              <span className="font-display font-black text-slate-900">{pulse.disruption_forecast.probability}%</span>
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border rounded-sm ${
+                pulse.disruption_forecast.level === "High" ? "bg-rose-50 text-rose-700 border-rose-200" :
+                pulse.disruption_forecast.level === "Elevated" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                {pulse.disruption_forecast.level}
+              </span>
+            </div>
+          )}
+          <div className="space-y-2.5">
+            {(pulse?.recommendations || []).map((r, i) => (
+              <div key={i} className="feed-enter flex items-start gap-3 p-3 bg-slate-50 rounded-sm">
+                <span className="mt-0.5 w-2 h-2 rounded-full bg-blue-500 shrink-0 live-dot" />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-semibold text-slate-900">{r.title}</h4>
+                    <PriorityBadge level={r.priority} />
+                  </div>
+                  <p className="mt-0.5 text-sm text-slate-500 leading-relaxed">{r.detail}</p>
+                </div>
+              </div>
+            ))}
+            {!pulse && <p className="text-sm text-slate-400 py-4 text-center">Connecting to live signals…</p>}
+          </div>
+        </Panel>
+
         {loading && (
           <Panel testid="advisor-loading">
             <div className="py-16 flex flex-col items-center text-slate-400">

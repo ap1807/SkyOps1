@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import asyncio
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -17,6 +18,7 @@ from database import db, close_client
 from auth import auth_router, get_current_user, seed_admin
 from data_engine import engine, SERVICE_FIELDS, SERVICE_LABELS, CLASSES
 from feed_engine import feed
+from realtime_engine import realtime
 from ai_insights import generate_insights
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -157,7 +159,12 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
 # ---------------- live feed ----------------
 @api.get("/feed/live")
 async def live(user: dict = Depends(get_current_user)):
-    return feed.snapshot()
+    return feed.view()
+
+
+@api.get("/realtime/pulse")
+async def pulse(user: dict = Depends(get_current_user)):
+    return realtime.pulse()
 
 
 # ---------------- AI ----------------
@@ -168,7 +175,8 @@ class InsightBody(BaseModel):
 @api.post("/ai/insights")
 async def ai_insights(body: InsightBody, user: dict = Depends(get_current_user)):
     if body.scope == "disruption":
-        context = feed.snapshot()["kpis"]
+        p = realtime.pulse()
+        context = {**p["kpis"], "disruption_forecast": p["disruption_forecast"]}
     elif body.scope == "satisfaction":
         context = {
             "overview": engine.overview_metrics(),
@@ -177,7 +185,7 @@ async def ai_insights(body: InsightBody, user: dict = Depends(get_current_user))
     else:
         context = {
             "overview": engine.overview_metrics(),
-            "live": feed.snapshot()["kpis"],
+            "live": realtime.pulse()["kpis"],
         }
     result = await generate_insights(body.scope, context)
     return result
@@ -203,9 +211,23 @@ async def on_start():
         await db.login_attempts.create_index("identifier")
     except Exception as e:
         logger.warning(f"index setup: {e}")
+    app.state.rt_task = asyncio.create_task(_realtime_loop())
     logger.info("SkyOps backend ready.")
+
+
+async def _realtime_loop():
+    """Server-side ticker: evolves live operational state every few seconds."""
+    while True:
+        await asyncio.sleep(3)
+        try:
+            realtime.tick()
+        except Exception as e:
+            logger.warning(f"realtime tick error: {e}")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    task = getattr(app.state, "rt_task", None)
+    if task:
+        task.cancel()
     close_client()
