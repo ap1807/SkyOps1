@@ -21,14 +21,14 @@ export default function Comparisons() {
   const [findings, setFindings] = useState([]);
 
   useEffect(() => {
-    const load = () => api.get(`/analytics/compare?dimension=${dim}`).then((r) => setData(r.data));
+    const load = () => api.get(`/analytics/compare?dimension=${dim}`).then((r) => setData(r.data)).catch(() => {});
     load();
     const t = setInterval(load, 8000);
     return () => clearInterval(t);
   }, [dim]);
 
   useEffect(() => {
-    const load = () => api.get("/analytics/significance").then((r) => setFindings(r.data.findings));
+    const load = () => api.get("/analytics/significance").then((r) => setFindings(r.data.findings)).catch(() => {});
     load();
     const t = setInterval(load, 12000);
     return () => clearInterval(t);

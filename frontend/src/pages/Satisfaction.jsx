@@ -17,11 +17,11 @@ export default function Satisfaction() {
 
   useEffect(() => {
     const load = () => {
-      api.get("/analytics/drivers").then((r) => setDrivers(r.data.drivers.slice(0, 8)));
-      api.get("/analytics/conditional").then((r) => setConditional(r.data.insights));
-      api.get("/analytics/age-distribution").then((r) => setAges(r.data.bands));
-      api.get("/analytics/satisfaction").then((r) => setSat(r.data));
-      api.get("/analytics/significance").then((r) => setFindings(r.data.findings));
+      api.get("/analytics/drivers").then((r) => setDrivers(r.data.drivers.slice(0, 8))).catch(() => {});
+      api.get("/analytics/conditional").then((r) => setConditional(r.data.insights)).catch(() => {});
+      api.get("/analytics/age-distribution").then((r) => setAges(r.data.bands)).catch(() => {});
+      api.get("/analytics/satisfaction").then((r) => setSat(r.data)).catch(() => {});
+      api.get("/analytics/significance").then((r) => setFindings(r.data.findings)).catch(() => {});
       setUpdatedAt(new Date());
     };
     load();

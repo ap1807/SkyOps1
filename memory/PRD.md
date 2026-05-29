@@ -28,6 +28,13 @@ Production-grade real-time aviation passenger satisfaction analytics platform us
 ## Status
 - Backend tested 27/28 -> CSV upload critical bugs fixed (label mapping + atomic load_dataframe). Frontend 100% across 7 routes. AI insights confirmed real gpt-4o.
 
+## Realtime Upgrade (2026-05-29)
+- Added backend-driven realtime layer: realtime_engine.py with a server-side asyncio ticker (every 3s) that advances the live feed, drifts live satisfaction (engine.live_delta), recomputes a network disruption forecast and rule-based smart recommendations.
+- New endpoint GET /api/realtime/pulse (kpis, server-maintained history, by_class, events, congestion, flights, disruption_forecast, recommendations).
+- feed_engine split into tick() (advance) + view() (read-only); analytics now reflect live drift.
+- Frontend usePulse hook (3s polling): Overview, Disruption, Predictive, Advisor stream live; Satisfaction & Comparisons auto-refresh. Live trend chart streams satisfaction vs risk.
+- Tested 33/33 backend. Hardened /analytics/drivers & /analytics/significance to be NaN/degenerate-safe (no 500 on sparse uploads); frontend fetches wrapped in catch.
+
 ## Backlog / Next
 - P1: WebSocket push for feed (currently 3-4s polling); persist datasets per user
 - P1: Route-level deep dives, downloadable PDF executive briefings

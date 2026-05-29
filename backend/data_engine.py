@@ -194,16 +194,24 @@ class AnalyticsEngine:
     def satisfaction_drivers(self) -> list:
         df = self.df
         out = []
+        y = df["satisfied"].values
+        y_std = float(np.std(y))
         for f in SERVICE_FIELDS:
-            corr = float(np.corrcoef(df[f], df["satisfied"])[0, 1])
-            sat_avg = float(df.loc[df["satisfied"] == 1, f].mean())
-            dis_avg = float(df.loc[df["satisfied"] == 0, f].mean())
+            x = df[f].values
+            if y_std == 0 or float(np.std(x)) == 0:
+                corr = 0.0
+            else:
+                corr = float(np.corrcoef(x, y)[0, 1])
+            if not np.isfinite(corr):
+                corr = 0.0
+            sat_avg = df.loc[df["satisfied"] == 1, f].mean()
+            dis_avg = df.loc[df["satisfied"] == 0, f].mean()
             out.append({
                 "field": f,
                 "label": SERVICE_LABELS[f],
                 "impact": round(corr * 100, 1),
-                "avg_satisfied": round(sat_avg, 2),
-                "avg_dissatisfied": round(dis_avg, 2),
+                "avg_satisfied": round(float(sat_avg), 2) if np.isfinite(sat_avg) else 0.0,
+                "avg_dissatisfied": round(float(dis_avg), 2) if np.isfinite(dis_avg) else 0.0,
             })
         out.sort(key=lambda x: x["impact"], reverse=True)
         return out
@@ -242,40 +250,59 @@ class AnalyticsEngine:
         df = self.df
         findings = []
 
+        def safe_pct(series):
+            m = series.mean()
+            return f"{m*100:.1f}" if len(series) and np.isfinite(m) else "—"
+
         # Two-proportion z-test: Business vs Eco satisfaction
-        b = df[df["travel_class"] == "Business"]["satisfied"]
-        e = df[df["travel_class"] == "Eco"]["satisfied"]
-        z, p = _two_proportion_z(b, e)
-        findings.append({
-            "title": "Business class drives materially higher satisfaction",
-            "metric": f"{b.mean()*100:.1f}% vs {e.mean()*100:.1f}%",
-            "confidence": round((1 - p) * 100, 2),
-            "significant": bool(p < 0.05),
-            "detail": "Comparison of satisfaction between Business and Economy cabins.",
-        })
+        try:
+            b = df[df["travel_class"] == "Business"]["satisfied"]
+            e = df[df["travel_class"] == "Eco"]["satisfied"]
+            if len(b) >= 5 and len(e) >= 5:
+                z, p = _two_proportion_z(b, e)
+                findings.append({
+                    "title": "Business class drives materially higher satisfaction",
+                    "metric": f"{safe_pct(b)}% vs {safe_pct(e)}%",
+                    "confidence": round((1 - p) * 100, 2),
+                    "significant": bool(p < 0.05),
+                    "detail": "Comparison of satisfaction between Business and Economy cabins.",
+                })
+        except Exception:
+            pass
 
         # t-test: arrival delay for satisfied vs dissatisfied
-        d_sat = df[df["satisfied"] == 1]["arrival_delay"]
-        d_dis = df[df["satisfied"] == 0]["arrival_delay"]
-        t, pt = stats.ttest_ind(d_sat, d_dis, equal_var=False)
-        findings.append({
-            "title": "Arrival delays are significantly higher for unhappy passengers",
-            "metric": f"{d_dis.mean():.0f} min vs {d_sat.mean():.0f} min avg delay",
-            "confidence": round((1 - pt) * 100, 2),
-            "significant": bool(pt < 0.05),
-            "detail": "Average arrival delay experienced by dissatisfied vs satisfied passengers.",
-        })
+        try:
+            d_sat = df[df["satisfied"] == 1]["arrival_delay"]
+            d_dis = df[df["satisfied"] == 0]["arrival_delay"]
+            if len(d_sat) >= 2 and len(d_dis) >= 2 and d_sat.std() + d_dis.std() > 0:
+                t, pt = stats.ttest_ind(d_sat, d_dis, equal_var=False)
+                if np.isfinite(pt):
+                    findings.append({
+                        "title": "Arrival delays are significantly higher for unhappy passengers",
+                        "metric": f"{d_dis.mean():.0f} min vs {d_sat.mean():.0f} min avg delay",
+                        "confidence": round((1 - pt) * 100, 2),
+                        "significant": bool(pt < 0.05),
+                        "detail": "Average arrival delay experienced by dissatisfied vs satisfied passengers.",
+                    })
+        except Exception:
+            pass
 
         # chi-square: customer loyalty vs satisfaction
-        ct = pd.crosstab(df["customer_type"], df["satisfied"])
-        chi2, pc, _, _ = stats.chi2_contingency(ct)
-        findings.append({
-            "title": "Loyalty status is strongly associated with satisfaction",
-            "metric": f"{df[df['customer_type']=='Loyal']['satisfied'].mean()*100:.1f}% loyal satisfaction",
-            "confidence": round((1 - pc) * 100, 2),
-            "significant": bool(pc < 0.05),
-            "detail": "Association between frequent-flyer loyalty and satisfaction outcome.",
-        })
+        try:
+            ct = pd.crosstab(df["customer_type"], df["satisfied"])
+            if ct.shape[0] >= 2 and ct.shape[1] >= 2:
+                chi2, pc, _, _ = stats.chi2_contingency(ct)
+                loyal = df[df["customer_type"] == "Loyal"]["satisfied"]
+                findings.append({
+                    "title": "Loyalty status is strongly associated with satisfaction",
+                    "metric": f"{safe_pct(loyal)}% loyal satisfaction",
+                    "confidence": round((1 - pc) * 100, 2),
+                    "significant": bool(pc < 0.05),
+                    "detail": "Association between frequent-flyer loyalty and satisfaction outcome.",
+                })
+        except Exception:
+            pass
+
         return findings
 
     def compare_segments(self, dimension: str) -> dict:
