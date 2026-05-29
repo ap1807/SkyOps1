@@ -1,0 +1,111 @@
+{
+  "theme": "light",
+  "archetype": "4 - Swiss & High-Contrast (Modern Minimal Variant)",
+  "emotional_tone": "Professional, reliable, analytical, clean, modern enterprise",
+  "typography": {
+    "heading_font": "Chivo",
+    "body_font": "IBM Plex Sans",
+    "mono_font": "IBM Plex Mono",
+    "font_import_url": "https://fonts.googleapis.com/css2?family=Chivo:wght@300;400;700;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&display=swap",
+    "scale": {
+      "h1": "text-4xl sm:text-5xl font-black tracking-tight leading-none text-slate-900",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight text-slate-900",
+      "h3": "text-xl sm:text-2xl font-bold tracking-tight text-slate-800",
+      "h4": "text-lg font-semibold tracking-tight text-slate-800",
+      "body": "text-sm text-slate-600 leading-relaxed",
+      "metric_value": "text-3xl sm:text-4xl font-black tracking-tighter text-slate-900",
+      "label": "text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"
+    }
+  },
+  "colors": {
+    "background": "#FFFFFF",
+    "surface": "#F8FAFC",
+    "surface_elevated": "#FFFFFF",
+    "border": "#E2E8F0",
+    "primary": "#0F172A",
+    "primary_foreground": "#FFFFFF",
+    "accent_blue": "#2563EB",
+    "accent_teal": "#0D9488",
+    "accent_orange": "#EA580C",
+    "danger": "#DC2626",
+    "success": "#16A34A",
+    "warning": "#D97706",
+    "text_primary": "#0F172A",
+    "text_secondary": "#475569",
+    "text_tertiary": "#94A3B8"
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous spacing around layout containers, dense spacing within data widgets.",
+    "page_padding": "p-4 sm:p-8 lg:p-12",
+    "grid_strategy": "Control Room Grid (Dense, Data Correlation). Base: grid-cols-12. Gap: gap-4 or gap-6.",
+    "card_padding": "p-6",
+    "radius": {
+      "container": "rounded-none or rounded-sm (max 4px)",
+      "button": "rounded-none or rounded-sm"
+    }
+  },
+  "surface_strategies": {
+    "dashboard_cards": "Flat solid backgrounds (bg-white), sharp edges or max 4px radius, 1px subtle border (border-slate-200), NO shadows. Optical alignment for metrics.",
+    "header": "Solid white background, 1px border-b border-slate-200. Sticky top.",
+    "interactive_elements": "Hover states must have higher contrast, e.g., hover:bg-slate-100 for subtle items, or hover:bg-slate-800 for primary buttons. Focus rings must be clear and blue."
+  },
+  "animations": {
+    "hover": "transition-colors duration-200 ease-in-out",
+    "entrance": "fade-in and slide-in-from-bottom-2 (duration 300ms, staggered)",
+    "micro_interactions": "Subtle scale on icon buttons (active:scale-95)"
+  },
+  "components": {
+    "libraries_required": [
+      "lucide-react",
+      "recharts",
+      "clsx",
+      "tailwind-merge"
+    ],
+    "shadcn_customizations": {
+      "card": "Remove default shadow. Use border-slate-200. Reduce border-radius to rounded-sm.",
+      "button": "Use sharp corners (rounded-sm). Primary button bg-slate-900 hover:bg-slate-800 text-white. Secondary button bg-slate-100 hover:bg-slate-200 text-slate-900.",
+      "table": "Dense padding (py-2 px-4). Header text uppercase, xs, high tracking. Rows have subtle border-b.",
+      "chart": "Use Recharts. Minimalist axes (no grid lines or very faint stroke-slate-100). Colors must match the primary accent colors (blue, teal, orange). No default legends, build custom HTML legends."
+    },
+    "custom_elements": {
+      "metric_widget": "Contains an overline label, a massive metric value, and a small trend indicator (green/red) with a Lucide arrow icon.",
+      "live_feed": "A vertical scrolling list or dense table with real-time updates (use simple CSS keyframes for a pulsing 'live' dot)."
+    }
+  },
+  "media": {
+    "images": [
+      {
+        "category": "login_background",
+        "url": "https://static.prod-images.emergentagent.com/jobs/1525d765-1c9c-4bcb-bfe0-5f82cec57d49/images/838db9bf60df7ed45746ad762cb9652a3fea267fc6b0509a9503b09d1cccbf0c.png",
+        "description": "Abstract minimalist data visualization background, soft neutrals, representing flight paths."
+      },
+      {
+        "category": "dashboard_header_art",
+        "url": "https://static.prod-images.emergentagent.com/jobs/1525d765-1c9c-4bcb-bfe0-5f82cec57d49/images/c6092a372517262a6406ddf98db657484adcb6792f600e15accd5f51f7d47346.png",
+        "description": "Minimalist abstract aviation dashboard graphic."
+      },
+      {
+        "category": "airport_terminal_1",
+        "url": "https://images.unsplash.com/photo-1715927134295-6b1016e28414?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBhaXJwb3J0JTIwdGVybWluYWwlMjBwYXNzZW5nZXJ8ZW58MHx8fHwxNzgwMDI4MDcxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Group of people in modern airport terminal (useful for contextual side panels or login)."
+      },
+      {
+        "category": "airport_terminal_2",
+        "url": "https://images.pexels.com/photos/16108892/pexels-photo-16108892.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Bustling airport scene with travelers on moving walkway."
+      }
+    ]
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure minimum 4.5:1 ratio for standard text against background. Metric values must pop.",
+    "testing_attributes": "All interactive elements, buttons, inputs, links, and key metric displays MUST have data-testid attributes."
+  },
+  "instructions_to_main_agent": [
+    "Implement a complete full-stack app with React frontend and FastAPI backend.",
+    "Use the Control Room grid system. The dashboard should look dense, precise, and highly analytical. No excessive whitespace inside data widgets.",
+    "Replace default Inter font with Chivo for headings and IBM Plex Sans for body.",
+    "Build a real-time live operational feed component mimicking web-socket updates.",
+    "Embed Recharts for data visualization (distribution, predictions, comparisons).",
+    "Use the provided image URLs for the login screen background and any dashboard header graphics."
+  ]
+}
