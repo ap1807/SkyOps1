@@ -128,7 +128,10 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
     if not sat_col:
         raise HTTPException(status_code=400, detail="CSV must include a 'satisfaction' or 'satisfied' column")
     if sat_col == "satisfaction":
-        df["satisfied"] = df["satisfaction"].astype(str).str.contains("satisf", case=False).astype(int)
+        # exact-match labels: 'satisfied' -> 1, anything else (e.g. 'neutral or dissatisfied') -> 0
+        df["satisfied"] = df["satisfaction"].astype(str).str.strip().str.lower().eq("satisfied").astype(int)
+    else:
+        df["satisfied"] = pd.to_numeric(df["satisfied"], errors="coerce")
     missing = [f for f in SERVICE_FIELDS if f not in df.columns]
     for f in missing:
         df[f] = 3
@@ -139,9 +142,15 @@ async def upload(file: UploadFile = File(...), user: dict = Depends(get_current_
         if c not in df.columns:
             df[c] = "Eco" if c == "travel_class" else "Unknown"
     df = df.dropna(subset=["satisfied"])
+    df["satisfied"] = df["satisfied"].astype(int)
     if len(df) < 30:
         raise HTTPException(status_code=400, detail="Dataset too small after cleaning (need >= 30 rows)")
-    engine.load_dataframe(df, f"Uploaded: {file.filename}")
+    if df["satisfied"].nunique() < 2:
+        raise HTTPException(status_code=400, detail="Dataset must contain both satisfied and dissatisfied passengers")
+    try:
+        engine.load_dataframe(df, f"Uploaded: {file.filename}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "rows": int(len(df)), "source": engine.source}
 
 

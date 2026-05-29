@@ -104,23 +104,29 @@ class AnalyticsEngine:
         self._fit_model()
 
     # ---------------- model ----------------
-    def _fit_model(self):
-        df = self.df
+    def _build_model(self, df: pd.DataFrame):
+        if int(df["satisfied"].nunique()) < 2:
+            raise ValueError("Dataset must contain both satisfied and dissatisfied passengers")
         X_num = df[SERVICE_FIELDS + ["age", "flight_distance", "arrival_delay"]].copy()
         X_num["is_business_class"] = (df["travel_class"] == "Business").astype(int)
         X_num["is_eco_class"] = (df["travel_class"] == "Eco").astype(int)
         X_num["is_loyal"] = (df["customer_type"] == "Loyal").astype(int)
         X_num["is_business_travel"] = (df["travel_type"] == "Business").astype(int)
-        self.feature_order = list(X_num.columns)
-        self.scaler = StandardScaler().fit(X_num.values)
-        self.model = LogisticRegression(max_iter=500).fit(
-            self.scaler.transform(X_num.values), df["satisfied"].values
+        scaler = StandardScaler().fit(X_num.values)
+        model = LogisticRegression(max_iter=500).fit(
+            scaler.transform(X_num.values), df["satisfied"].values
         )
+        return list(X_num.columns), scaler, model
+
+    def _fit_model(self):
+        self.feature_order, self.scaler, self.model = self._build_model(self.df)
 
     def load_dataframe(self, df: pd.DataFrame, source: str):
+        # transactional: build artifacts first; only commit if fitting succeeds
+        feature_order, scaler, model = self._build_model(df)
         self.df = df
         self.source = source
-        self._fit_model()
+        self.feature_order, self.scaler, self.model = feature_order, scaler, model
 
     # ---------------- descriptive ----------------
     def overview_metrics(self) -> dict:
