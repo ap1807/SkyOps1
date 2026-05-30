@@ -105,7 +105,7 @@ async def dispatch_disruption_alerts():
     cur = LEVEL_RANK.get(level, 0)
     if cur < 1:
         return
-    users = await db.users.find({"email_alerts.enabled": True}).to_list(200)
+    users = await db.users.find({"email_alerts.enabled": True}, {"email": 1, "name": 1, "email_alerts": 1}).to_list(200)
     if not users:
         return
     pulse = realtime.pulse()
@@ -135,7 +135,7 @@ async def dispatch_daily_digest():
     today = now.date().isoformat()
     if now.hour < 8 or _last_digest_date["date"] == today:
         return
-    users = await db.users.find({"daily_digest": True}).to_list(200)
+    users = await db.users.find({"daily_digest": True}, {"email": 1, "name": 1, "daily_digest": 1}).to_list(200)
     _last_digest_date["date"] = today
     if not users:
         return

@@ -6,11 +6,145 @@ and exposes higher-level analytics that internally use descriptive statistics,
 probability, conditional probability, hypothesis testing and a fitted predictive
 model. To the end user these surface as operational insights, not formulas.
 """
+import math
 import numpy as np
 import pandas as pd
-from scipy import stats
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+
+
+# ---------------- lightweight stats helpers (no scipy/sklearn) ----------------
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _norm_sf(x: float) -> float:
+    return 1.0 - _norm_cdf(x)
+
+
+def _welch_ttest(a, b):
+    """Welch's t-test; large-sample normal approximation for the p-value."""
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    n1, n2 = len(a), len(b)
+    if n1 < 2 or n2 < 2:
+        return 0.0, 1.0
+    v1, v2 = a.var(ddof=1), b.var(ddof=1)
+    se = math.sqrt(v1 / n1 + v2 / n2)
+    if se == 0:
+        return 0.0, 1.0
+    t = (a.mean() - b.mean()) / se
+    return float(t), float(2.0 * _norm_sf(abs(t)))
+
+
+def _gser(a: float, x: float) -> float:
+    gln = math.lgamma(a)
+    ap = a
+    s = 1.0 / a
+    dl = s
+    for _ in range(300):
+        ap += 1.0
+        dl *= x / ap
+        s += dl
+        if abs(dl) < abs(s) * 1e-13:
+            break
+    return s * math.exp(-x + a * math.log(x) - gln)
+
+
+def _gcf(a: float, x: float) -> float:
+    gln = math.lgamma(a)
+    tiny = 1e-30
+    b = x + 1.0 - a
+    c = 1.0 / tiny
+    d = 1.0 / b
+    h = d
+    for i in range(1, 300):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < tiny:
+            d = tiny
+        c = b + an / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        de = d * c
+        h *= de
+        if abs(de - 1.0) < 1e-13:
+            break
+    return math.exp(-x + a * math.log(x) - gln) * h
+
+
+def _chi2_sf(x: float, k: float) -> float:
+    """Survival function of the chi-square distribution (regularized upper incomplete gamma)."""
+    if x <= 0 or k <= 0:
+        return 1.0
+    a, xx = k / 2.0, x / 2.0
+    if xx < a + 1.0:
+        return 1.0 - _gser(a, xx)
+    return _gcf(a, xx)
+
+
+def _chi2_contingency(ct: np.ndarray):
+    ct = np.asarray(ct, dtype=float)
+    total = ct.sum()
+    if total == 0:
+        return 0.0, 1.0
+    row = ct.sum(axis=1, keepdims=True)
+    col = ct.sum(axis=0, keepdims=True)
+    expected = row @ col / total
+    if np.any(expected == 0):
+        return 0.0, 1.0
+    chi2 = float(((ct - expected) ** 2 / expected).sum())
+    dof = (ct.shape[0] - 1) * (ct.shape[1] - 1)
+    return chi2, float(_chi2_sf(chi2, dof))
+
+
+# ---------------- minimal standardizer + logistic regression (numpy only) ----------------
+class _Scaler:
+    def fit(self, X):
+        X = np.asarray(X, dtype=float)
+        self.mean = X.mean(axis=0)
+        self.std = X.std(axis=0)
+        self.std[self.std == 0] = 1.0
+        return self
+
+    def transform(self, X):
+        return (np.asarray(X, dtype=float) - self.mean) / self.std
+
+
+class _LogReg:
+    """Binary logistic regression fitted via IRLS (Newton-Raphson) with L2 regularization."""
+
+    def fit(self, X, y, iters=30, l2=1e-3):
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=float)
+        n, d = X.shape
+        Xb = np.hstack([np.ones((n, 1)), X])
+        w = np.zeros(d + 1)
+        reg = l2 * np.eye(d + 1)
+        reg[0, 0] = 0.0
+        for _ in range(iters):
+            z = np.clip(Xb @ w, -30, 30)
+            p = 1.0 / (1.0 + np.exp(-z))
+            wgt = np.clip(p * (1.0 - p), 1e-6, None)
+            grad = Xb.T @ (p - y) + l2 * np.r_[0.0, w[1:]]
+            H = (Xb * wgt[:, None]).T @ Xb + reg
+            try:
+                step = np.linalg.solve(H, grad)
+            except np.linalg.LinAlgError:
+                step = np.linalg.lstsq(H, grad, rcond=None)[0]
+            w_new = w - step
+            if np.max(np.abs(w_new - w)) < 1e-9:
+                w = w_new
+                break
+            w = w_new
+        self.intercept = float(w[0])
+        self.coef = w[1:]
+        return self
+
+    def predict_proba1(self, X):
+        X = np.asarray(X, dtype=float)
+        z = np.clip(self.intercept + X @ self.coef, -30, 30)
+        return 1.0 / (1.0 + np.exp(-z))
 
 RNG = np.random.default_rng(42)
 
@@ -113,10 +247,8 @@ class AnalyticsEngine:
         X_num["is_eco_class"] = (df["travel_class"] == "Eco").astype(int)
         X_num["is_loyal"] = (df["customer_type"] == "Loyal").astype(int)
         X_num["is_business_travel"] = (df["travel_type"] == "Business").astype(int)
-        scaler = StandardScaler().fit(X_num.values)
-        model = LogisticRegression(max_iter=500).fit(
-            scaler.transform(X_num.values), df["satisfied"].values
-        )
+        scaler = _Scaler().fit(X_num.values)
+        model = _LogReg().fit(scaler.transform(X_num.values), df["satisfied"].values)
         return list(X_num.columns), scaler, model
 
     def _fit_model(self):
@@ -275,7 +407,7 @@ class AnalyticsEngine:
             d_sat = df[df["satisfied"] == 1]["arrival_delay"]
             d_dis = df[df["satisfied"] == 0]["arrival_delay"]
             if len(d_sat) >= 2 and len(d_dis) >= 2 and d_sat.std() + d_dis.std() > 0:
-                t, pt = stats.ttest_ind(d_sat, d_dis, equal_var=False)
+                t, pt = _welch_ttest(d_sat, d_dis)
                 if np.isfinite(pt):
                     findings.append({
                         "title": "Arrival delays are significantly higher for unhappy passengers",
@@ -291,7 +423,7 @@ class AnalyticsEngine:
         try:
             ct = pd.crosstab(df["customer_type"], df["satisfied"])
             if ct.shape[0] >= 2 and ct.shape[1] >= 2:
-                chi2, pc, _, _ = stats.chi2_contingency(ct)
+                chi2, pc = _chi2_contingency(ct.values)
                 loyal = df[df["customer_type"] == "Loyal"]["satisfied"]
                 findings.append({
                     "title": "Loyalty status is strongly associated with satisfaction",
@@ -355,11 +487,11 @@ class AnalyticsEngine:
         row["is_business_travel"] = 1 if travel_type == "Business" else 0
 
         x = np.array([[row[c] for c in self.feature_order]], dtype=float)
-        prob = float(self.model.predict_proba(self.scaler.transform(x))[0, 1])
+        prob = float(self.model.predict_proba1(self.scaler.transform(x))[0])
 
         # contribution-style drivers from standardized coefficients
         xs = self.scaler.transform(x)[0]
-        contrib = xs * self.model.coef_[0]
+        contrib = xs * self.model.coef
         idx = np.argsort(np.abs(contrib))[::-1][:5]
         drivers = []
         nice = {
@@ -407,7 +539,7 @@ def _two_proportion_z(a: pd.Series, b: pd.Series):
     if se == 0:
         return 0.0, 1.0
     z = (p1 - p2) / se
-    pval = 2 * (1 - stats.norm.cdf(abs(z)))
+    pval = 2 * (1 - _norm_cdf(abs(z)))
     return float(z), float(pval)
 
 
