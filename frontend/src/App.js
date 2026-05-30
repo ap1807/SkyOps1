@@ -12,6 +12,7 @@ import Comparisons from "@/pages/Comparisons";
 import Disruption from "@/pages/Disruption";
 import Advisor from "@/pages/Advisor";
 import Explorer from "@/pages/Explorer";
+import Settings from "@/pages/Settings";
 
 function App() {
   return (
@@ -35,6 +36,7 @@ function App() {
               <Route path="disruptions" element={<Disruption />} />
               <Route path="advisor" element={<Advisor />} />
               <Route path="explorer" element={<Explorer />} />
+              <Route path="alerts" element={<Settings />} />
             </Route>
           </Routes>
         </BrowserRouter>

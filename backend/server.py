@@ -20,6 +20,7 @@ from data_engine import engine, SERVICE_FIELDS, SERVICE_LABELS, CLASSES
 from feed_engine import feed
 from realtime_engine import realtime
 from ai_insights import generate_insights
+from emails import email_router, dispatch_disruption_alerts, dispatch_daily_digest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("skyops")
@@ -192,6 +193,7 @@ async def ai_insights(body: InsightBody, user: dict = Depends(get_current_user))
 
 
 app.include_router(auth_router)
+app.include_router(email_router)
 app.include_router(api)
 
 app.add_middleware(
@@ -217,10 +219,15 @@ async def on_start():
 
 async def _realtime_loop():
     """Server-side ticker: evolves live operational state every few seconds."""
+    ticks = 0
     while True:
         await asyncio.sleep(3)
         try:
             realtime.tick()
+            await dispatch_disruption_alerts()
+            ticks += 1
+            if ticks % 100 == 0:  # ~every 5 minutes
+                await dispatch_daily_digest()
         except Exception as e:
             logger.warning(f"realtime tick error: {e}")
 

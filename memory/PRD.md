@@ -35,6 +35,13 @@ Production-grade real-time aviation passenger satisfaction analytics platform us
 - Frontend usePulse hook (3s polling): Overview, Disruption, Predictive, Advisor stream live; Satisfaction & Comparisons auto-refresh. Live trend chart streams satisfaction vs risk.
 - Tested 33/33 backend. Hardened /analytics/drivers & /analytics/significance to be NaN/degenerate-safe (no 500 on sparse uploads); frontend fetches wrapped in catch.
 
+## Email Notifications (Resend) — 2026-05-30
+- Integrated Resend (email_service.py + emails.py). Branded HTML templates: operational briefing, disruption alert, daily digest.
+- Endpoints: GET/PUT /api/email/settings (alerts_enabled, alert_threshold Elevated|High, daily_digest), POST /api/email/briefing, POST /api/email/test.
+- Real-time alerts dispatched from the realtime loop when forecast crosses user threshold (30-min cooldown). Daily digest dispatched once/day (>=08:00 UTC) to opted-in users.
+- Frontend: new "Email & Alerts" settings page (toggles + threshold + send test) and "Email me this briefing" button on AI Advisor. Emails go to the logged-in user's address.
+- Resend TEST MODE delivers only to verified address patiladi430@gmail.com; verify a domain to email any recipient. Verified real delivery (message id returned). Email-enabled login account: patiladi430@gmail.com / SkyOps@2026.
+
 ## Backlog / Next
 - P1: WebSocket push for feed (currently 3-4s polling); persist datasets per user
 - P1: Route-level deep dives, downloadable PDF executive briefings

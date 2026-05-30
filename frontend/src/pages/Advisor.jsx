@@ -2,7 +2,8 @@ import { useState } from "react";
 import api from "@/lib/api";
 import usePulse from "@/lib/usePulse";
 import { Panel, PriorityBadge, LiveDot } from "@/components/widgets";
-import { Bot, Sparkles, AlertTriangle, Cpu, Activity } from "lucide-react";
+import { Bot, Sparkles, AlertTriangle, Cpu, Activity, Mail } from "lucide-react";
+import { toast } from "sonner";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -17,6 +18,7 @@ export default function Advisor() {
   const [scope, setScope] = useState("overview");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const { pulse } = usePulse(4000);
 
   const generate = async () => {
@@ -27,6 +29,18 @@ export default function Advisor() {
       setResult(res.data);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const emailBriefing = async () => {
+    setEmailing(true);
+    try {
+      const { data } = await api.post("/email/briefing", { include_ai: true });
+      toast.success(`Briefing emailed to ${data.to}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Email delivery failed");
+    } finally {
+      setEmailing(false);
     }
   };
 
@@ -57,6 +71,11 @@ export default function Advisor() {
         <button onClick={generate} disabled={loading} data-testid="generate-insights"
           className="mt-5 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm py-3 rounded-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-60 active:scale-[0.99]">
           <Sparkles className="w-4 h-4" /> {loading ? "Thinking…" : "Generate Insights"}
+        </button>
+
+        <button onClick={emailBriefing} disabled={emailing} data-testid="email-briefing"
+          className="mt-3 w-full bg-white border border-slate-300 hover:bg-slate-50 text-slate-900 font-semibold text-sm py-3 rounded-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-60 active:scale-[0.99]">
+          <Mail className="w-4 h-4" /> {emailing ? "Sending…" : "Email me this briefing"}
         </button>
 
         {result?.generated_by && (

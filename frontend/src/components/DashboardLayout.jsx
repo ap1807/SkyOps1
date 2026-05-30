@@ -3,7 +3,7 @@ import { NavLink, useNavigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Gauge, Sparkles, GitCompareArrows, AlertTriangle,
-  Bot, Database, Plane, LogOut, ChevronDown,
+  Bot, Database, Plane, LogOut, ChevronDown, BellRing,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -18,6 +18,7 @@ const NAV = [
   { to: "/disruptions", label: "Disruption Monitor", icon: AlertTriangle },
   { to: "/advisor", label: "AI Advisor", icon: Bot },
   { to: "/explorer", label: "Data Explorer", icon: Database },
+  { to: "/alerts", label: "Email & Alerts", icon: BellRing },
 ];
 
 function Clock() {
